@@ -1,47 +1,36 @@
 ## AI Context Stacker
 
-AI Context Stacker is a Visual Studio Code extension designed to prepare code context for LLMs like ChatGPT, Claude, and Gemini. The tool collects and formats multiple files and directory structures into a single output for prompt insertion. This project uses TypeScript and Node.js, with `esbuild` for bundling.
+VS Code extension for staging files into named tracks and copying combined content to the clipboard for use with AI tools. State persists per workspace across sessions.
 
-## Folder Structure
+## Mental model
 
-The project organizes logic into specific directories under `src/`:
+A track is a named group of files. The stack is whichever track is currently active. Staged files carry pin state, folder scan origin, and token count.
 
-- `commands/`: Handles actions like adding files or copying context.
-- `models/`: Defines data structures for files and tracks.
-- `providers/`: Manages file collections and exclusion patterns.
-- `services/`: Contains core logic for tree building, persistence, and token counting.
-- `ui/`: Manages webviews, status bars, and drag-and-drop features.
-- `utils/`: Includes helpers for clipboard tasks and file scanning.
+Dependencies flow in one direction: `models → services → providers → commands / ui`
 
-## Build and Run
+- `commands/` — thin handlers, one file per command
+- `models/` — pure data shapes, no VS Code imports
+- `providers/` — bridge between services and VS Code; `TrackManager` owns mutations, `StackProvider` owns the tree view
+- `services/` — core logic: persistence, hydration, token analysis, tree building, file watching
+- `ui/` — tree rendering, status bar, drag and drop, webview preview; owns no state
+- `utils/` — stateless helpers: clipboard, formatting, file scanning, token estimation
+- `constants.ts` — shared constants: file size limits, exclude patterns, known extensions
+- `extension.ts` — activation entry point, wires `ServiceRegistry` and registers commands
 
-The development lifecycle relies on `npm`. Run these commands to get started:
+## Build and test
 
-1. **Install Dependencies**
-   ```bash
-   npm install
-   ```
-2. **Compile Development Build**
-   ```bash
-   npm run compile
-   ```
-3. **Package for Production**
-   ```bash
-   npm run package
-   ```
-4. **Watch for Changes**
-   ```bash
-   npm run watch
-   ```
-5. **Run Tests**
-   ```bash
-   npm test
-   ```
+```plaintext
+npm install       # install dependencies
+npm run compile   # type check, lint, bundle
+npm run watch     # parallel watch for esbuild and tsc
+npm run test      # compile tests then run suite
+```
 
-## Development Standards
+Press `F5` in VS Code to launch the Extension Development Host.
 
-- **Language**: All source code uses strict TypeScript.
-- **Commits**: Compliance with the Conventional Commits spec is required. Use lowercase for all subjects.
-- **Formatting**: Prettier and ESLint maintain code cleanliness.
-- **Automation**: Husky executes spell checks and formatting on every commit to ensure quality.
-- **Reliability**: The `src/test/suite` includes specific tests for persistence, hydration, and tree building.
+## Standards
+
+- Commits follow Conventional Commits: `type(scope): description`
+- Common types: `feat`, `fix`, `chore`, `refactor`, `test`, `docs`
+- Prose follows `standards/prose.md` — active voice, no buzzwords, no vague qualifiers
+- Changelog entries follow `standards/changelog.md` — `component: fragment` format, no bold, no periods
