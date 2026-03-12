@@ -142,19 +142,19 @@ All notable changes to this project will be documented in this file.
 - tokens: real-time token counting with configurable warning thresholds
 - limits: 100MB clipboard cap and 5MB per-file limit
 
-[Unreleased]: https://github.com/erclx/ai-context-stacker/compare/v0.1.2...HEAD
-[0.1.2]: https://github.com/erclx/ai-context-stacker/compare/v0.1.1...v0.1.2
-[0.1.1]: https://github.com/erclx/ai-context-stacker/compare/v0.1.0...v0.1.1
-[0.1.0]: https://github.com/erclx/ai-context-stacker/compare/v0.0.16...v0.1.0
-[0.0.15]: https://github.com/erclx/ai-context-stacker/compare/v0.0.14...v0.0.15
-[0.0.14]: https://github.com/erclx/ai-context-stacker/compare/v0.0.13...v0.0.14
-[0.0.13]: https://github.com/erclx/ai-context-stacker/compare/v0.0.10...v0.0.13
-[0.0.10 - 0.0.11]: https://github.com/erclx/ai-context-stacker/compare/v0.0.9...v0.0.11
-[0.0.9]: https://github.com/erclx/ai-context-stacker/compare/v0.0.8...v0.0.9
-[0.0.8]: https://github.com/erclx/ai-context-stacker/compare/v0.0.7...v0.0.8
-[0.0.7]: https://github.com/erclx/ai-context-stacker/compare/v0.0.6...v0.0.7
-[0.0.6]: https://github.com/erclx/ai-context-stacker/compare/v0.0.5...v0.0.6
-[0.0.5]: https://github.com/erclx/ai-context-stacker/compare/v0.0.4...v0.0.5
-[0.0.4]: https://github.com/erclx/ai-context-stacker/compare/v0.0.3...v0.0.4
-[0.0.3]: https://github.com/erclx/ai-context-stacker/compare/v0.0.1...v0.0.3
-[0.0.1]: https://github.com/erclx/ai-context-stacker/releases/tag/v0.0.1
+[Unreleased]: https://github.com/erclx/stackr/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/erclx/stackr/compare/v0.1.1...v0.1.2
+[0.1.1]: https://github.com/erclx/stackr/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/erclx/stackr/compare/v0.0.16...v0.1.0
+[0.0.15]: https://github.com/erclx/stackr/compare/v0.0.14...v0.0.15
+[0.0.14]: https://github.com/erclx/stackr/compare/v0.0.13...v0.0.14
+[0.0.13]: https://github.com/erclx/stackr/compare/v0.0.10...v0.0.13
+[0.0.10 - 0.0.11]: https://github.com/erclx/stackr/compare/v0.0.9...v0.0.11
+[0.0.9]: https://github.com/erclx/stackr/compare/v0.0.8...v0.0.9
+[0.0.8]: https://github.com/erclx/stackr/compare/v0.0.7...v0.0.8
+[0.0.7]: https://github.com/erclx/stackr/compare/v0.0.6...v0.0.7
+[0.0.6]: https://github.com/erclx/stackr/compare/v0.0.5...v0.0.6
+[0.0.5]: https://github.com/erclx/stackr/compare/v0.0.4...v0.0.5
+[0.0.4]: https://github.com/erclx/stackr/compare/v0.0.3...v0.0.4
+[0.0.3]: https://github.com/erclx/stackr/compare/v0.0.1...v0.0.3
+[0.0.1]: https://github.com/erclx/stackr/releases/tag/v0.0.1

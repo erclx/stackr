@@ -8,9 +8,9 @@
   "icon": "assets/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/erclx/ai-context-stacker.git"
+    "url": "https://github.com/erclx/stackr.git"
   },
-  "homepage": "https://github.com/erclx/ai-context-stacker",
+  "homepage": "https://github.com/erclx/stackr",
   "engines": {
     "vscode": "^1.85.0"
   },

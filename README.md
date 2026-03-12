@@ -7,7 +7,7 @@
 Prepare file context and directory maps for models like ChatGPT, Claude, or Gemini within VS Code. Drag files into organized tracks to copy project context in one action.
 
 <p align="center">
-  <img src="https://github.com/erclx/ai-context-stacker/raw/main/demos/hero.gif" alt="Drag and Drop Demo" width="800" />
+  <img src="https://github.com/erclx/stackr/raw/main/demos/hero.gif" alt="Drag and Drop Demo" width="800" />
 </p>
 
 ## Quick start
@@ -105,7 +105,7 @@ All settings are prefixed with `aiContextStacker` in `settings.json`.
 
 ## Support
 
-- **Issues:** [GitHub Issues](https://github.com/erclx/ai-context-stacker/issues)
+- **Issues:** [GitHub Issues](https://github.com/erclx/stackr/issues)
 - **Changelog:** [CHANGELOG.md](CHANGELOG.md)
 
 ## License
