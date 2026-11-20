@@ -71,7 +71,7 @@ export async function syncFilesWithFileSystem(
       chunk.map(async (uri) => {
         try {
           const stat = await vscode.workspace.fs.stat(uri)
-          if (stat.type === vscode.FileType.File) {
+          if ((stat.type & vscode.FileType.File) !== 0) {
             validFiles.push(uri)
           }
         } catch {
@@ -189,8 +189,11 @@ async function processStatBatch(batch: vscode.Uri[], files: vscode.Uri[], folder
     batch.map(async (target) => {
       try {
         const stat = await vscode.workspace.fs.stat(target)
-        if (stat.type === vscode.FileType.File) files.push(target)
-        if (stat.type === vscode.FileType.Directory) folders.push(target)
+        if ((stat.type & vscode.FileType.Directory) !== 0) {
+          folders.push(target)
+        } else if ((stat.type & vscode.FileType.File) !== 0) {
+          files.push(target)
+        }
       } catch {
         Logger.warn(`Skipping unreadable item: ${target.fsPath}`)
       }
@@ -227,7 +230,7 @@ async function safeReadDirectory(rootUri: vscode.Uri, results: vscode.Uri[]): Pr
   try {
     const children = await vscode.workspace.fs.readDirectory(rootUri)
     children.forEach(([name, type]) => {
-      if (type === vscode.FileType.Directory) {
+      if ((type & vscode.FileType.Directory) !== 0) {
         results.push(vscode.Uri.joinPath(rootUri, name))
       }
     })

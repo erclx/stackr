@@ -1,8 +1,10 @@
 import * as vscode from 'vscode'
 
-import { ContextTrack } from '../models'
-import { TokenAggregatorService } from '../services'
+import { ContextTrack, StackTreeItem, StagedFile } from '../models'
+import { getDescendantFiles, TokenAggregatorService } from '../services'
 import { TrackManager } from './track-manager'
+
+const STACK_ITEMS_MIME_TYPE = 'application/vnd.code.tree.stack-provider.internal'
 
 export class TrackProvider
   implements vscode.TreeDataProvider<ContextTrack>, vscode.TreeDragAndDropController<ContextTrack>, vscode.Disposable
@@ -11,7 +13,7 @@ export class TrackProvider
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event
 
   public readonly dragMimeTypes = ['application/vnd.code.tree.aiContextTracks']
-  public readonly dropMimeTypes = ['application/vnd.code.tree.aiContextTracks']
+  public readonly dropMimeTypes = ['application/vnd.code.tree.aiContextTracks', STACK_ITEMS_MIME_TYPE]
 
   private disposable: vscode.Disposable
 
@@ -48,6 +50,12 @@ export class TrackProvider
     sources: vscode.DataTransfer,
     token: vscode.CancellationToken,
   ): void | Thenable<void> {
+    const stackItemsTransfer = sources.get(STACK_ITEMS_MIME_TYPE)
+    if (stackItemsTransfer && target) {
+      this.handleStagedFilesDrop(stackItemsTransfer.value as StackTreeItem[], target)
+      return
+    }
+
     const transferItem = sources.get('application/vnd.code.tree.aiContextTracks')
     if (!transferItem) {
       return
@@ -96,6 +104,36 @@ export class TrackProvider
     this._onDidChangeTreeData.dispose()
   }
 
+  private handleStagedFilesDrop(items: StackTreeItem[] | undefined, targetTrack: ContextTrack): void {
+    if (!Array.isArray(items) || items.length === 0) {
+      return
+    }
+
+    const activeTrack = this.contextTrackManager.getActiveTrack()
+    if (targetTrack.id === activeTrack.id) {
+      return
+    }
+
+    const fileMap = new Map<string, StagedFile>()
+    for (const item of items) {
+      for (const file of getDescendantFiles(item)) {
+        fileMap.set(file.uri.toString(), file)
+      }
+    }
+
+    const files = Array.from(fileMap.values())
+    if (files.length === 0) {
+      return
+    }
+
+    const result = this.contextTrackManager.moveFilesToTrack(files, activeTrack.id, targetTrack.id)
+    const msg =
+      result.skippedDuplicates > 0
+        ? `Moved ${result.transferredCount} file(s) to "${targetTrack.name}" (${result.skippedDuplicates} already present).`
+        : `Moved ${result.transferredCount} file(s) to "${targetTrack.name}".`
+    vscode.window.setStatusBarMessage(msg, 3000)
+  }
+
   private getTrackContextValue(element: ContextTrack, isActive: boolean): string {
     const allTracks = this.contextTrackManager.allTracks
     const isOnly = allTracks.length === 1
@@ -125,6 +163,9 @@ export class TrackProvider
   private getTrackDescription(element: ContextTrack, isActive: boolean): string {
     if (isActive) {
       const fileCount = element.files.length
+      if (!this.tokenAggregator.isTokenEstimationEnabled) {
+        return `(Active) • ${fileCount} files`
+      }
       const tokenCount = this.tokenAggregator.totalTokens
       const formattedTokens = this.tokenAggregator.format(tokenCount)
 

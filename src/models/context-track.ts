@@ -23,3 +23,24 @@ export interface SerializedState {
   activeTrackId: string
   trackOrder: string[]
 }
+
+export interface ExportedStackFile {
+  path: string
+  workspaceFolder?: string
+  isPinned: boolean
+  isFromFolderAddition?: boolean
+}
+
+export interface ExportedTrack {
+  id: string
+  name: string
+  files: ExportedStackFile[]
+}
+
+export interface StackrExportData {
+  version: 1
+  exportedAt: string
+  activeTrackId: string
+  trackOrder: string[]
+  tracks: ExportedTrack[]
+}

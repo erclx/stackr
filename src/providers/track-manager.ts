@@ -1,10 +1,28 @@
 import * as path from 'path'
 import * as vscode from 'vscode'
 
-import { ContextTrack, refreshFileLabel, StagedFile } from '../models'
-import { HydrationService, PersistenceService } from '../services'
+import {
+  ContextTrack,
+  ExportedStackFile,
+  ExportedTrack,
+  refreshFileLabel,
+  StackrExportData,
+  StagedFile,
+} from '../models'
+import { HydrationService, PersistenceService, StateMapper } from '../services'
 import { generateId, Logger } from '../utils'
 import { isChildOf } from '../utils/file-scanner'
+
+export interface TransferResult {
+  transferredCount: number
+  skippedDuplicates: number
+}
+
+export interface ImportResult {
+  importedTracks: number
+  importedFiles: number
+  missingFiles: number
+}
 
 export class TrackManager implements vscode.Disposable {
   private tracks = new Map<string, ContextTrack>()
@@ -35,6 +53,17 @@ export class TrackManager implements vscode.Disposable {
     return this._trackOrder.map((id) => this.tracks.get(id)).filter((t): t is ContextTrack => t !== undefined)
   }
 
+  public getTrackById(id: string): ContextTrack | undefined {
+    return this.tracks.get(id)
+  }
+
+  public async flushSaveNow(): Promise<void> {
+    if (this._isDisposed || !this._isInitialized) {
+      return
+    }
+    await this.persistence.saveImmediate(this.tracks, this.activeTrackId, this._trackOrder, true)
+  }
+
   public getActiveTrack(): ContextTrack {
     const track = this.tracks.get(this.activeTrackId)
     if (!track) {
@@ -60,16 +89,24 @@ export class TrackManager implements vscode.Disposable {
     if (this._isDisposed || !this.tracks.has(id)) return
     this.activeTrackId = id
     await this.persistence.saveImmediate(this.tracks, this.activeTrackId, this._trackOrder)
+    this.updateContextKeys()
     this.fireChange()
   }
 
-  public createTrack(baseName: string): string {
+  public createTrack(baseName: string, switchImmediately: boolean = true): string {
     const id = generateId('track')
     const uniqueName = this.ensureUniqueName(baseName)
 
     this.tracks.set(id, { id, name: uniqueName, files: [] })
     this._trackOrder.push(id)
-    void this.switchToTrack(id)
+
+    if (switchImmediately) {
+      void this.switchToTrack(id)
+    } else {
+      this.requestSave()
+      this.updateContextKeys()
+      this.fireChange()
+    }
     return id
   }
 
@@ -85,6 +122,7 @@ export class TrackManager implements vscode.Disposable {
 
     track.name = newName
     this.requestSave()
+    this.updateContextKeys()
     this.fireChange(track)
     return true
   }
@@ -112,6 +150,7 @@ export class TrackManager implements vscode.Disposable {
 
     this.createDefaultTrack(true)
     await this.persistence.saveImmediate(this.tracks, this.activeTrackId, this._trackOrder)
+    this.updateContextKeys()
     this.fireChange()
   }
 
@@ -134,6 +173,201 @@ export class TrackManager implements vscode.Disposable {
 
     this.requestSave()
     this.fireChange()
+  }
+
+  public copyFilesToTrack(files: StagedFile[], targetTrackId: string): TransferResult {
+    const targetTrack = this.tracks.get(targetTrackId)
+    if (!targetTrack || files.length === 0) {
+      return { transferredCount: 0, skippedDuplicates: 0 }
+    }
+
+    const existing = new Set(targetTrack.files.map((f) => f.uri.toString()))
+    const toAdd: StagedFile[] = []
+    let skippedDuplicates = 0
+
+    for (const file of files) {
+      const key = file.uri.toString()
+      if (existing.has(key)) {
+        skippedDuplicates++
+        continue
+      }
+      existing.add(key)
+      toAdd.push({
+        type: 'file',
+        uri: file.uri,
+        label: file.label,
+        stats: file.stats ? { ...file.stats } : undefined,
+        isBinary: file.isBinary,
+        isPinned: !!file.isPinned,
+        isFromFolderAddition: !!file.isFromFolderAddition,
+      })
+    }
+
+    if (toAdd.length > 0) {
+      targetTrack.files.push(...toAdd)
+      this.finalizeChange()
+    }
+
+    return { transferredCount: toAdd.length, skippedDuplicates }
+  }
+
+  public moveFilesToTrack(files: StagedFile[], sourceTrackId: string, targetTrackId: string): TransferResult {
+    if (sourceTrackId === targetTrackId || files.length === 0) {
+      return { transferredCount: 0, skippedDuplicates: 0 }
+    }
+
+    const sourceTrack = this.tracks.get(sourceTrackId)
+    const targetTrack = this.tracks.get(targetTrackId)
+    if (!sourceTrack || !targetTrack) {
+      return { transferredCount: 0, skippedDuplicates: 0 }
+    }
+
+    const existingInTarget = new Set(targetTrack.files.map((f) => f.uri.toString()))
+    const toRemoveKeys = new Set(files.map((f) => f.uri.toString()))
+    const toAdd: StagedFile[] = []
+    let skippedDuplicates = 0
+
+    for (const file of files) {
+      const key = file.uri.toString()
+      if (existingInTarget.has(key)) {
+        skippedDuplicates++
+        continue
+      }
+      existingInTarget.add(key)
+      toAdd.push({
+        type: 'file',
+        uri: file.uri,
+        label: file.label,
+        stats: file.stats ? { ...file.stats } : undefined,
+        isBinary: file.isBinary,
+        isPinned: !!file.isPinned,
+        isFromFolderAddition: !!file.isFromFolderAddition,
+      })
+    }
+
+    sourceTrack.files = sourceTrack.files.filter((f) => !toRemoveKeys.has(f.uri.toString()))
+    if (toAdd.length > 0) {
+      targetTrack.files.push(...toAdd)
+    }
+
+    this.finalizeChange()
+    return { transferredCount: toAdd.length, skippedDuplicates }
+  }
+
+  public exportTracksData(scope: 'all' | 'active' = 'all'): StackrExportData {
+    const selectedTracks = scope === 'active' ? [this.getActiveTrack()] : this.allTracks
+    const exportedTracks: ExportedTrack[] = selectedTracks.map((track) => ({
+      id: track.id,
+      name: track.name,
+      files: track.files.map((file) => this.serializePortableFile(file)),
+    }))
+
+    return {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      activeTrackId: scope === 'active' ? selectedTracks[0].id : this.activeTrackId,
+      trackOrder: exportedTracks.map((t) => t.id),
+      tracks: exportedTracks,
+    }
+  }
+
+  public async importTracksData(data: StackrExportData, mode: 'merge' | 'replace'): Promise<ImportResult> {
+    if (!data || !Array.isArray(data.tracks)) {
+      throw new Error('Invalid Stackr export format: missing tracks array.')
+    }
+
+    let importedTracks = 0
+    let importedFiles = 0
+    let missingFiles = 0
+
+    const resolvedTracks: ContextTrack[] = []
+
+    for (const rawTrack of data.tracks) {
+      if (!rawTrack || typeof rawTrack.name !== 'string') {
+        continue
+      }
+
+      const trackFiles: StagedFile[] = []
+      const seenUris = new Set<string>()
+      const rawFiles = Array.isArray(rawTrack.files) ? rawTrack.files : []
+
+      for (const rawFile of rawFiles) {
+        if (!rawFile || typeof rawFile.path !== 'string') {
+          continue
+        }
+        const resolvedUri = await this.resolvePortableFileUri(rawFile)
+        if (!resolvedUri) {
+          missingFiles++
+          continue
+        }
+
+        const key = resolvedUri.toString()
+        if (seenUris.has(key)) {
+          continue
+        }
+        seenUris.add(key)
+
+        trackFiles.push({
+          type: 'file',
+          uri: resolvedUri,
+          label: StateMapper.extractLabel(resolvedUri),
+          isPinned: !!rawFile.isPinned,
+          isFromFolderAddition: !!rawFile.isFromFolderAddition,
+        })
+        importedFiles++
+      }
+
+      resolvedTracks.push({
+        id: typeof rawTrack.id === 'string' && rawTrack.id.trim() ? rawTrack.id : generateId('track'),
+        name: rawTrack.name.trim() || 'Imported Track',
+        files: trackFiles,
+      })
+      importedTracks++
+    }
+
+    if (mode === 'replace') {
+      this.tracks.clear()
+      this._trackOrder = []
+
+      if (resolvedTracks.length === 0) {
+        this.createDefaultTrack(true)
+      } else {
+        for (const track of resolvedTracks) {
+          const uniqueId = this.tracks.has(track.id) ? generateId('track') : track.id
+          const uniqueName = this.ensureUniqueName(track.name)
+          this.tracks.set(uniqueId, { id: uniqueId, name: uniqueName, files: track.files })
+          this._trackOrder.push(uniqueId)
+        }
+
+        const requestedActive = data.activeTrackId
+        this.activeTrackId = this.tracks.has(requestedActive) ? requestedActive : this._trackOrder[0]
+      }
+    } else {
+      for (const track of resolvedTracks) {
+        const existingByName = Array.from(this.tracks.values()).find((t) => t.name === track.name)
+        if (existingByName) {
+          const existingSet = new Set(existingByName.files.map((f) => f.uri.toString()))
+          for (const file of track.files) {
+            if (!existingSet.has(file.uri.toString())) {
+              existingByName.files.push(file)
+              existingSet.add(file.uri.toString())
+            }
+          }
+        } else {
+          const newId = this.tracks.has(track.id) ? generateId('track') : track.id
+          const uniqueName = this.ensureUniqueName(track.name)
+          this.tracks.set(newId, { id: newId, name: uniqueName, files: track.files })
+          this._trackOrder.push(newId)
+        }
+      }
+    }
+
+    this.validateStateIntegrity()
+    await this.persistence.saveImmediate(this.tracks, this.activeTrackId, this._trackOrder)
+    this.updateContextKeys()
+    this.fireChange()
+
+    return { importedTracks, importedFiles, missingFiles }
   }
 
   public toggleFilesPin(files: StagedFile[]): void {
@@ -287,6 +521,60 @@ export class TrackManager implements vscode.Disposable {
     }
   }
 
+  private serializePortableFile(file: StagedFile): ExportedStackFile {
+    const wsFolder = vscode.workspace.getWorkspaceFolder(file.uri)
+    if (wsFolder) {
+      const rel = path.relative(wsFolder.uri.fsPath, file.uri.fsPath).replace(/\\/g, '/')
+      return {
+        path: rel,
+        workspaceFolder: wsFolder.name,
+        isPinned: !!file.isPinned,
+        isFromFolderAddition: !!file.isFromFolderAddition,
+      }
+    }
+
+    const fallbackRelative = vscode.workspace.asRelativePath(file.uri, false).replace(/\\/g, '/')
+    const storedPath =
+      fallbackRelative === file.uri.fsPath || fallbackRelative === file.uri.path
+        ? file.uri.toString()
+        : fallbackRelative
+
+    return {
+      path: storedPath,
+      isPinned: !!file.isPinned,
+      isFromFolderAddition: !!file.isFromFolderAddition,
+    }
+  }
+
+  private async resolvePortableFileUri(file: ExportedStackFile): Promise<vscode.Uri | null> {
+    const normalized = file.path.replace(/\\/g, '/')
+    const folders = vscode.workspace.workspaceFolders || []
+
+    if (!normalized.includes('://') && !normalized.startsWith('/') && !/^[a-zA-Z]:\//.test(normalized)) {
+      const orderedFolders = [...folders]
+      if (file.workspaceFolder) {
+        orderedFolders.sort((a, b) => {
+          const aMatch = a.name === file.workspaceFolder ? 0 : 1
+          const bMatch = b.name === file.workspaceFolder ? 0 : 1
+          return aMatch - bMatch
+        })
+      }
+
+      const segments = normalized.split('/').filter((s) => s.length > 0 && s !== '.')
+      for (const folder of orderedFolders) {
+        const candidate = vscode.Uri.joinPath(folder.uri, ...segments)
+        try {
+          await vscode.workspace.fs.stat(candidate)
+          return candidate
+        } catch {
+          // Try next workspace folder
+        }
+      }
+    }
+
+    return StateMapper.resolveValidUri(file.path)
+  }
+
   private normalizePath(p: string): string {
     let res = p
     res = res.replace(/\\/g, '/')
@@ -402,6 +690,7 @@ export class TrackManager implements vscode.Disposable {
 
   private finalizeChange(): void {
     this.requestSave()
+    this.updateContextKeys()
     this.fireChange()
   }
 
@@ -478,6 +767,7 @@ export class TrackManager implements vscode.Disposable {
       void this.switchToTrack(nextId)
     } else {
       this.requestSave()
+      this.updateContextKeys()
       this.fireChange()
     }
   }

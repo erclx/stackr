@@ -42,6 +42,16 @@
           "default": "INFO",
           "description": "The minimum level of logs to record in the output channel."
         },
+        "aiContextStacker.autoReveal": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically reveal and select the active editor file in the Staged Files view, similar to Explorer."
+        },
+        "aiContextStacker.enableTokenEstimation": {
+          "type": "boolean",
+          "default": true,
+          "description": "Estimate token counts for staged files. Disable this to skip reading and analyzing file contents when you only want to build the Context Map."
+        },
         "aiContextStacker.excludes": {
           "type": "array",
           "default": [],
@@ -113,6 +123,32 @@
           "type": "string",
           "default": "# File Contents",
           "description": "The Markdown title for the file contents section."
+        },
+        "aiContextStacker.storageMode": {
+          "type": "string",
+          "enum": [
+            "workspaceState",
+            "workspaceFile"
+          ],
+          "enumDescriptions": [
+            "Store tracks in VS Code internal workspaceState (subject to 100KB size limit).",
+            "Store tracks in .vscode/stackr.json inside the workspace (no 100KB limit, portable via Git/sync)."
+          ],
+          "default": "workspaceState",
+          "description": "Where Stackr persists tracks and staged files for this workspace."
+        },
+        "aiContextStacker.sortOrder": {
+          "type": "string",
+          "enum": [
+            "name",
+            "tokensDesc"
+          ],
+          "enumDescriptions": [
+            "Sort pinned items first, then folders and files alphabetically.",
+            "Sort pinned items first, then by token count (highest first)."
+          ],
+          "default": "name",
+          "description": "Sort order for items in the Staged Files view."
         }
       }
     },
@@ -157,6 +193,11 @@
         "category": "Stackr"
       },
       {
+        "command": "aiContextStacker.addFileToStackFromTab",
+        "title": "Add to Stackr",
+        "category": "Stackr"
+      },
+      {
         "command": "aiContextStacker.addFolderPicker",
         "title": "Add Folder...",
         "category": "Stackr",
@@ -165,6 +206,12 @@
       {
         "command": "aiContextStacker.addOpenFiles",
         "title": "Add All Open Files",
+        "category": "Stackr",
+        "icon": "$(editor-layout)"
+      },
+      {
+        "command": "aiContextStacker.addSelectedOpenTabs",
+        "title": "Add Open Tabs to Stackr...",
         "category": "Stackr",
         "icon": "$(editor-layout)"
       },
@@ -187,6 +234,12 @@
         "icon": "$(copy)"
       },
       {
+        "command": "aiContextStacker.copyContextMap",
+        "title": "Copy Context Map Only",
+        "category": "Stackr",
+        "icon": "$(list-tree)"
+      },
+      {
         "command": "aiContextStacker.copyAndClear",
         "title": "Copy and Clear Stack",
         "category": "Stackr",
@@ -197,6 +250,12 @@
         "title": "Copy Content",
         "category": "Stackr",
         "icon": "$(copy)"
+      },
+      {
+        "command": "aiContextStacker.copyFilesToTrack",
+        "title": "Copy to Track...",
+        "category": "Stackr",
+        "icon": "$(files)"
       },
       {
         "command": "aiContextStacker.copyExplorerContent",
@@ -215,6 +274,30 @@
         "title": "Delete Track",
         "category": "Stackr",
         "icon": "$(trash)"
+      },
+      {
+        "command": "aiContextStacker.exportData",
+        "title": "Export Stackr Data...",
+        "category": "Stackr",
+        "icon": "$(export)"
+      },
+      {
+        "command": "aiContextStacker.exportStackZip",
+        "title": "Export Stack as Zip...",
+        "category": "Stackr",
+        "icon": "$(file-zip)"
+      },
+      {
+        "command": "aiContextStacker.importData",
+        "title": "Import Stackr Data...",
+        "category": "Stackr",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "aiContextStacker.moveFilesToTrack",
+        "title": "Move to Track...",
+        "category": "Stackr",
+        "icon": "$(arrow-right)"
       },
       {
         "command": "aiContextStacker.moveTrackDown",
@@ -330,6 +413,12 @@
         "icon": "$(pin)"
       },
       {
+        "command": "aiContextStacker.toggleTokenEstimation",
+        "title": "Toggle Token Estimation",
+        "category": "Stackr",
+        "icon": "$(dashboard)"
+      },
+      {
         "command": "aiContextStacker.unpinAll",
         "title": "Unpin All Files",
         "category": "Stackr",
@@ -344,6 +433,48 @@
         "command": "aiContextStacker.internalPrev",
         "title": "Select Previous Item",
         "category": "Stackr"
+      },
+      {
+        "command": "aiContextStacker.addGitChangedFiles",
+        "title": "Add All Git Changed Files",
+        "category": "Stackr",
+        "icon": "$(git-compare)"
+      },
+      {
+        "command": "aiContextStacker.addGitStagedFiles",
+        "title": "Add Git Staged Files",
+        "category": "Stackr",
+        "icon": "$(git-commit)"
+      },
+      {
+        "command": "aiContextStacker.addGitBranchDiffFiles",
+        "title": "Add Git Files Changed vs Branch...",
+        "category": "Stackr",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "aiContextStacker.addProblemFiles",
+        "title": "Add Files with Problems...",
+        "category": "Stackr",
+        "icon": "$(error)"
+      },
+      {
+        "command": "aiContextStacker.openTrackFiles",
+        "title": "Open All Files in Track",
+        "category": "Stackr",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "aiContextStacker.sortByTokens",
+        "title": "Sort by Token Count",
+        "category": "Stackr",
+        "icon": "$(sort-precedence)"
+      },
+      {
+        "command": "aiContextStacker.sortByName",
+        "title": "Sort by Name",
+        "category": "Stackr",
+        "icon": "$(list-tree)"
       }
     ],
     "menus": {
@@ -371,9 +502,35 @@
       ],
       "editor/title/context": [
         {
-          "command": "aiContextStacker.addFileToStack",
+          "command": "aiContextStacker.addFileToStackFromTab",
           "when": "resourceScheme == file",
-          "group": "1_cutcopypaste"
+          "group": "1_cutcopypaste@1"
+        },
+        {
+          "command": "aiContextStacker.addSelectedOpenTabs",
+          "when": "resourceScheme == file",
+          "group": "1_cutcopypaste@2"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "command": "aiContextStacker.addFileToStack",
+          "when": "scmProvider == git",
+          "group": "7_modification@1"
+        }
+      ],
+      "scm/resourceGroup/context": [
+        {
+          "command": "aiContextStacker.addFileToStack",
+          "when": "scmProvider == git",
+          "group": "7_modification@1"
+        }
+      ],
+      "scm/resourceFolder/context": [
+        {
+          "command": "aiContextStacker.addFileToStack",
+          "when": "scmProvider == git",
+          "group": "7_modification@1"
         }
       ],
       "view/title": [
@@ -387,6 +544,16 @@
           "command": "aiContextStacker.deleteAllTracks",
           "when": "view == aiContextTracksView && aiContextStacker.canReset",
           "group": "navigation@9"
+        },
+        {
+          "command": "aiContextStacker.exportData",
+          "when": "view == aiContextTracksView",
+          "group": "1_data@1"
+        },
+        {
+          "command": "aiContextStacker.importData",
+          "when": "view == aiContextTracksView",
+          "group": "1_data@2"
         },
         {
           "//": "--- Staged Files: Title Actions (Visible) ---",
@@ -416,9 +583,14 @@
           "group": "1_primary@2"
         },
         {
+          "command": "aiContextStacker.addSelectedOpenTabs",
+          "when": "view == aiContextStackerView",
+          "group": "1_primary@3"
+        },
+        {
           "command": "aiContextStacker.addCurrentFile",
           "when": "view == aiContextStackerView && aiContextStacker.isTextEditorActive && !aiContextStacker.isCurrentFileInStack",
-          "group": "1_primary@3"
+          "group": "1_primary@4"
         },
         {
           "//": "--- Staged Files: Overflow Menu (Group 2: View/Action) ---",
@@ -427,14 +599,24 @@
           "group": "2_secondary@1"
         },
         {
-          "command": "aiContextStacker.copyAndClear",
+          "command": "aiContextStacker.copyContextMap",
           "when": "view == aiContextStackerView && aiContextStacker.hasFiles",
           "group": "2_secondary@2"
         },
         {
-          "command": "aiContextStacker.refreshStack",
+          "command": "aiContextStacker.copyAndClear",
           "when": "view == aiContextStackerView && aiContextStacker.hasFiles",
           "group": "2_secondary@3"
+        },
+        {
+          "command": "aiContextStacker.exportStackZip",
+          "when": "view == aiContextStackerView && aiContextStacker.hasFiles",
+          "group": "2_secondary@4"
+        },
+        {
+          "command": "aiContextStacker.refreshStack",
+          "when": "view == aiContextStackerView && aiContextStacker.hasFiles",
+          "group": "2_secondary@5"
         },
         {
           "//": "--- Staged Files: Overflow Menu (Group 3: Filtering) ---",
@@ -464,18 +646,74 @@
         },
         {
           "//": "--- Staged Files: Overflow Menu (Group 4: Config) ---",
+          "command": "aiContextStacker.toggleTokenEstimation",
+          "when": "view == aiContextStackerView",
+          "group": "4_config@1"
+        },
+        {
+          "command": "aiContextStacker.exportData",
+          "when": "view == aiContextStackerView",
+          "group": "4_config@2"
+        },
+        {
+          "command": "aiContextStacker.importData",
+          "when": "view == aiContextStackerView",
+          "group": "4_config@3"
+        },
+        {
           "command": "aiContextStacker.openSettings",
           "when": "view == aiContextStackerView",
-          "group": "4_config"
+          "group": "4_config@4"
         },
         {
           "//": "--- Staged Files: Overflow Menu (Group 9: Danger) ---",
           "command": "aiContextStacker.clearAll",
           "when": "view == aiContextStackerView && aiContextStacker.hasFiles",
           "group": "9_danger"
+        },
+        {
+          "command": "aiContextStacker.addGitChangedFiles",
+          "when": "view == aiContextStackerView",
+          "group": "1_primary@5"
+        },
+        {
+          "command": "aiContextStacker.addGitStagedFiles",
+          "when": "view == aiContextStackerView",
+          "group": "1_primary@6"
+        },
+        {
+          "command": "aiContextStacker.addGitBranchDiffFiles",
+          "when": "view == aiContextStackerView",
+          "group": "1_primary@7"
+        },
+        {
+          "command": "aiContextStacker.addProblemFiles",
+          "when": "view == aiContextStackerView",
+          "group": "1_primary@8"
+        },
+        {
+          "command": "aiContextStacker.openTrackFiles",
+          "when": "view == aiContextStackerView && aiContextStacker.hasFiles",
+          "group": "2_secondary@6"
+        },
+        {
+          "command": "aiContextStacker.sortByTokens",
+          "when": "view == aiContextStackerView && aiContextStacker.hasFiles && !aiContextStacker.sortByTokens",
+          "group": "3_filtering@6"
+        },
+        {
+          "command": "aiContextStacker.sortByName",
+          "when": "view == aiContextStackerView && aiContextStacker.hasFiles && aiContextStacker.sortByTokens",
+          "group": "3_filtering@7"
         }
       ],
       "view/item/context": [
+        {
+          "//": "--- Open Editors View ---",
+          "command": "aiContextStacker.addFileToStack",
+          "when": "view == workbench.explorer.openEditorsView",
+          "group": "7_modification@1"
+        },
         {
           "//": "--- Tracks: Hover Icons ---",
           "command": "aiContextStacker.renameTrack",
@@ -533,17 +771,27 @@
         {
           "command": "aiContextStacker.syncFolder",
           "when": "view == aiContextStackerView && viewItem == stagedFolder",
-          "group": "2_secondary"
+          "group": "2_secondary@1"
         },
         {
           "command": "aiContextStacker.togglePin",
           "when": "view == aiContextStackerView && viewItem =~ /stagedFile|stagedFolder/",
-          "group": "2_secondary"
+          "group": "2_secondary@2"
+        },
+        {
+          "command": "aiContextStacker.copyFilesToTrack",
+          "when": "view == aiContextStackerView && viewItem =~ /stagedFile|stagedFolder/",
+          "group": "2_secondary@3"
+        },
+        {
+          "command": "aiContextStacker.moveFilesToTrack",
+          "when": "view == aiContextStackerView && viewItem =~ /stagedFile|stagedFolder/",
+          "group": "2_secondary@4"
         },
         {
           "command": "aiContextStacker.revealInExplorer",
           "when": "view == aiContextStackerView && viewItem =~ /stagedFile|stagedFolder/",
-          "group": "2_secondary"
+          "group": "2_secondary@5"
         },
         {
           "command": "aiContextStacker.removeFile",
@@ -560,6 +808,28 @@
           "command": "aiContextStacker.addOpenFiles",
           "when": "view == aiContextStackerView && viewItem == emptyState",
           "group": "1_add"
+        },
+        {
+          "command": "aiContextStacker.openTrackFiles",
+          "when": "view == aiContextTracksView",
+          "group": "1_primary@3"
+        }
+      ],
+      "scm/title": [
+        {
+          "command": "aiContextStacker.addGitChangedFiles",
+          "when": "scmProvider == git",
+          "group": "7_stackr@1"
+        },
+        {
+          "command": "aiContextStacker.addGitStagedFiles",
+          "when": "scmProvider == git",
+          "group": "7_stackr@2"
+        },
+        {
+          "command": "aiContextStacker.addGitBranchDiffFiles",
+          "when": "scmProvider == git",
+          "group": "7_stackr@3"
         }
       ]
     },

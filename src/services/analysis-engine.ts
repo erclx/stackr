@@ -15,6 +15,7 @@ export class AnalysisEngine implements vscode.Disposable {
   private statsProcessor: StatsProcessor
   private _isWarmingUp = true
   private _activeEnrichmentCount = 0
+  private _tokenEstimationEnabled = true
   private pendingUpdates = new Map<string, NodeJS.Timeout>()
   private disposables: vscode.Disposable[] = []
 
@@ -30,15 +31,23 @@ export class AnalysisEngine implements vscode.Disposable {
     private trackManager: TrackManager,
   ) {
     this.statsProcessor = new StatsProcessor(context)
+    this._tokenEstimationEnabled = this.readTokenEstimationSetting()
+    if (!this._tokenEstimationEnabled) {
+      this._isWarmingUp = false
+    }
     this.registerListeners()
   }
 
   public get isWarmingUp(): boolean {
-    return this._isWarmingUp
+    return this._tokenEstimationEnabled && this._isWarmingUp
   }
 
   public get isAnalyzing(): boolean {
-    return this._activeEnrichmentCount > 0
+    return this._tokenEstimationEnabled && this._activeEnrichmentCount > 0
+  }
+
+  public get isTokenEstimationEnabled(): boolean {
+    return this._tokenEstimationEnabled
   }
 
   public dispose(): void {
@@ -59,6 +68,13 @@ export class AnalysisEngine implements vscode.Disposable {
 
   public async enrichActiveTrack(token?: vscode.CancellationToken): Promise<void> {
     if (token?.isCancellationRequested) return
+
+    if (!this._tokenEstimationEnabled) {
+      this._isWarmingUp = false
+      this._onDidStatusChange.fire()
+      this._onDidUpdateStats.fire()
+      return
+    }
 
     this._activeEnrichmentCount++
     this._onDidStatusChange.fire()
@@ -101,6 +117,12 @@ export class AnalysisEngine implements vscode.Disposable {
     this.disposables.push(
       vscode.workspace.onDidChangeTextDocument((e) => this.handleDocChange(e.document)),
 
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration('aiContextStacker.enableTokenEstimation')) {
+          this.handleTokenEstimationToggle()
+        }
+      }),
+
       vscode.window.onDidChangeWindowState((state) => {
         if (!state.focused) {
           this.clearAllPendingTimers()
@@ -109,7 +131,33 @@ export class AnalysisEngine implements vscode.Disposable {
     )
   }
 
+  private readTokenEstimationSetting(): boolean {
+    return vscode.workspace.getConfiguration('aiContextStacker').get<boolean>('enableTokenEstimation', true)
+  }
+
+  private handleTokenEstimationToggle(): void {
+    const enabled = this.readTokenEstimationSetting()
+    if (enabled === this._tokenEstimationEnabled) {
+      return
+    }
+
+    this._tokenEstimationEnabled = enabled
+    if (!enabled) {
+      this.clearAllPendingTimers()
+      this._isWarmingUp = false
+      this._onDidStatusChange.fire()
+      this._onDidUpdateStats.fire()
+      Logger.info('Token estimation disabled.')
+      return
+    }
+
+    Logger.info('Token estimation enabled. Enriching active track...')
+    void this.enrichActiveTrack()
+  }
+
   private handleDocChange(doc: vscode.TextDocument): void {
+    if (!this._tokenEstimationEnabled) return
+
     const files = this.trackManager.getActiveTrack().files
     const target = files.find((f) => f.uri.toString() === doc.uri.toString())
     if (target) this.scheduleStatsUpdate(doc, target)
@@ -124,6 +172,10 @@ export class AnalysisEngine implements vscode.Disposable {
   }
 
   private performStatsUpdate(doc: vscode.TextDocument, file: StagedFile): void {
+    if (!this._tokenEstimationEnabled) {
+      this.pendingUpdates.delete(doc.uri.toString())
+      return
+    }
     file.stats = this.statsProcessor.measure(doc.getText())
     this._onDidUpdateStats.fire()
     this.pendingUpdates.delete(doc.uri.toString())

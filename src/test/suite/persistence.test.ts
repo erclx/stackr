@@ -86,6 +86,30 @@ suite('PersistenceService Suite', () => {
     assert.strictEqual(mementoStub.update.calledOnce, true, 'Should detect order change')
   })
 
+  test('Should detect changes in track name', async () => {
+    const tracks = createTracks(['file1.ts'])
+    await persistence.saveImmediate(tracks, 'track1', ['track1'])
+    mementoStub.update.resetHistory()
+
+    tracks.get('track1')!.name = 'Renamed Track'
+
+    await persistence.saveImmediate(tracks, 'track1', ['track1'])
+
+    assert.strictEqual(mementoStub.update.calledOnce, true, 'Should detect track rename')
+  })
+
+  test('Should detect changes in file pin state', async () => {
+    const tracks = createTracks(['file1.ts'])
+    await persistence.saveImmediate(tracks, 'track1', ['track1'])
+    mementoStub.update.resetHistory()
+
+    tracks.get('track1')!.files[0].isPinned = true
+
+    await persistence.saveImmediate(tracks, 'track1', ['track1'])
+
+    assert.strictEqual(mementoStub.update.calledOnce, true, 'Should detect pin state change')
+  })
+
   test('Should clear state and reset fingerprint', async () => {
     const tracks = createTracks(['file1.ts'])
     await persistence.saveImmediate(tracks, 'track1', ['track1'])

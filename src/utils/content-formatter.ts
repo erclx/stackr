@@ -19,6 +19,8 @@ export interface FormatOptions {
   token?: vscode.CancellationToken
   maxTotalBytes?: number
   skipTree?: boolean
+  forceTree?: boolean
+  skipContents?: boolean
 }
 
 interface FormatterConfig {
@@ -83,12 +85,13 @@ export class ContentFormatter {
   private static getConfig(opts: FormatOptions): FormatterConfig {
     const cfg = vscode.workspace.getConfiguration('aiContextStacker')
     const userTreeMap = cfg.get<boolean>('showTreeMap', true)
+    const userIncludeContents = cfg.get<boolean>('includeFileContents', true)
 
     return {
-      showTreeMap: opts.skipTree ? false : userTreeMap,
+      showTreeMap: opts.skipTree ? false : opts.forceTree ? true : userTreeMap,
       showTreeMapHeader: cfg.get<boolean>('showTreeMapHeader', true),
       treeMapText: cfg.get<string>('treeMapText', '# Context Map'),
-      includeFileContents: cfg.get<boolean>('includeFileContents', true),
+      includeFileContents: opts.skipContents ? false : userIncludeContents,
       showFileContentsHeader: cfg.get<boolean>('showFileContentsHeader', true),
       fileContentsText: cfg.get<string>('fileContentsText', '# File Contents'),
       maxSizeBytes: opts.maxTotalBytes ?? this.DEFAULT_MAX_BYTES,
