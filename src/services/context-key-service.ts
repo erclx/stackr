@@ -23,6 +23,10 @@ export class ContextKeyService implements vscode.Disposable {
     this.set('aiContextStacker.pinnedOnly', active)
   }
 
+  public updateSortByTokens(active: boolean): void {
+    this.set('aiContextStacker.sortByTokens', active)
+  }
+
   public updateFolderState(hasFolders: boolean): void {
     this.set('aiContextStacker.hasFolders', hasFolders)
   }

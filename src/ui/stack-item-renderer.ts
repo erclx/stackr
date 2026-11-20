@@ -6,16 +6,21 @@ export class StackItemRenderer {
   private readonly EMPTY_URI_SCHEME = 'ai-stack'
   private readonly EMPTY_ID = 'emptyState'
 
-  public render(element: StackTreeItem, isWarmingUp: boolean, largeFileThreshold: number): vscode.TreeItem {
+  public render(
+    element: StackTreeItem,
+    isWarmingUp: boolean,
+    largeFileThreshold: number,
+    tokenEstimationEnabled: boolean = true,
+  ): vscode.TreeItem {
     if (isStagedFolder(element)) {
-      return this.renderFolder(element, isWarmingUp)
+      return this.renderFolder(element, isWarmingUp, tokenEstimationEnabled)
     }
 
     if (element.uri.scheme === this.EMPTY_URI_SCHEME) {
       return this.renderEmptyState(element, isWarmingUp)
     }
 
-    return this.renderFile(element, isWarmingUp, largeFileThreshold)
+    return this.renderFile(element, isWarmingUp, largeFileThreshold, tokenEstimationEnabled)
   }
 
   public createPlaceholderItem(): StagedFile {
@@ -31,7 +36,7 @@ export class StackItemRenderer {
     return count >= 1000 ? `~${(count / 1000).toFixed(1)}k` : `~${count}`
   }
 
-  private renderFolder(folder: StagedFolder, isWarmingUp: boolean): vscode.TreeItem {
+  private renderFolder(folder: StagedFolder, isWarmingUp: boolean, tokenEstimationEnabled: boolean): vscode.TreeItem {
     const item = new vscode.TreeItem(folder.label, vscode.TreeItemCollapsibleState.Expanded)
 
     item.contextValue = folder.isPinned ? 'stagedFolder:pinned' : 'stagedFolder'
@@ -43,15 +48,20 @@ export class StackItemRenderer {
       item.iconPath = vscode.ThemeIcon.Folder
     }
 
-    const hasStats = folder.tokenCount !== undefined
-    const displayValue = hasStats ? folder.tokenCount! : 0
-    const showCalculating = !hasStats && isWarmingUp
-
     const parts: string[] = []
-    if (showCalculating) {
-      parts.push('Calculating...')
+    if (!tokenEstimationEnabled) {
+      const totalFiles = this.countDescendantFiles(folder)
+      parts.push(`${totalFiles} ${totalFiles === 1 ? 'file' : 'files'}`)
     } else {
-      parts.push(this.formatTokenCount(displayValue))
+      const hasStats = folder.tokenCount !== undefined
+      const displayValue = hasStats ? folder.tokenCount! : 0
+      const showCalculating = !hasStats && isWarmingUp
+
+      if (showCalculating) {
+        parts.push('Calculating...')
+      } else {
+        parts.push(this.formatTokenCount(displayValue))
+      }
     }
 
     if (folder.isPinned) {
@@ -64,7 +74,12 @@ export class StackItemRenderer {
     return item
   }
 
-  private renderFile(file: StagedFile, isWarmingUp: boolean, threshold: number): vscode.TreeItem {
+  private renderFile(
+    file: StagedFile,
+    isWarmingUp: boolean,
+    threshold: number,
+    tokenEstimationEnabled: boolean,
+  ): vscode.TreeItem {
     const item = new vscode.TreeItem(file.label)
 
     item.resourceUri = file.uri
@@ -75,7 +90,7 @@ export class StackItemRenderer {
       arguments: [file.uri],
     }
 
-    this.applyContextualDecorations(item, file, isWarmingUp, threshold)
+    this.applyContextualDecorations(item, file, isWarmingUp, threshold, tokenEstimationEnabled)
 
     return item
   }
@@ -101,7 +116,15 @@ export class StackItemRenderer {
     file: StagedFile,
     isWarmingUp: boolean,
     threshold: number,
+    tokenEstimationEnabled: boolean,
   ): void {
+    if (!tokenEstimationEnabled) {
+      item.iconPath = new vscode.ThemeIcon(file.isPinned ? 'pin' : 'file')
+      item.tooltip = file.uri.fsPath
+      item.description = file.isPinned ? '(Pinned)' : undefined
+      return
+    }
+
     if (file.isBinary) {
       this.applyBinaryDecorations(item)
       return
@@ -162,5 +185,17 @@ export class StackItemRenderer {
     if (file.isPinned) parts.push('(Pinned)')
 
     return parts.join(' • ')
+  }
+
+  private countDescendantFiles(folder: StagedFolder): number {
+    let total = 0
+    for (const child of folder.children) {
+      if (isStagedFolder(child)) {
+        total += this.countDescendantFiles(child)
+      } else {
+        total += 1
+      }
+    }
+    return total
   }
 }

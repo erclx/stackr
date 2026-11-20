@@ -1,7 +1,7 @@
 import * as vscode from 'vscode'
 
 import { isStagedFolder, StackTreeItem, StagedFile } from '../models'
-import { AnalysisEngine, ContextKeyService, TokenAggregatorService, TreeBuilder } from '../services'
+import { AnalysisEngine, ContextKeyService, StackSortOrder, TokenAggregatorService, TreeBuilder } from '../services'
 import { StackDragDropController, StackItemRenderer } from '../ui'
 import { Logger, resolveScanRoots, syncFilesWithFileSystem } from '../utils'
 import { IgnoreManager } from './ignore-manager'
@@ -50,6 +50,19 @@ export class StackProvider implements vscode.TreeDataProvider<StackTreeItem>, vs
 
   public get hasActiveFilters(): boolean {
     return this._showPinnedOnly
+  }
+
+  public get sortOrder(): StackSortOrder {
+    return this.treeBuilder.sortOrder
+  }
+
+  public setSortOrder(order: StackSortOrder): void {
+    if (this.treeBuilder.sortOrder === order) {
+      return
+    }
+    this.treeBuilder.setSortOrder(order)
+    this.contextKeyService.updateSortByTokens(order === 'tokensDesc')
+    this.resort()
   }
 
   public togglePinnedOnly(): boolean {
@@ -114,11 +127,11 @@ export class StackProvider implements vscode.TreeDataProvider<StackTreeItem>, vs
 
   public getTreeItem(element: StackTreeItem): vscode.TreeItem {
     const isBusy = this.analysisEngine.isWarmingUp || this.analysisEngine.isAnalyzing
-    return this.renderer.render(element, isBusy, this._largeFileThreshold)
+    return this.renderer.render(element, isBusy, this._largeFileThreshold, this.analysisEngine.isTokenEstimationEnabled)
   }
 
-  public getParent(): vscode.ProviderResult<StackTreeItem> {
-    return undefined
+  public getParent(element: StackTreeItem): vscode.ProviderResult<StackTreeItem> {
+    return this.treeBuilder.getParent(element)
   }
 
   public async addFile(uri: vscode.Uri): Promise<boolean> {
@@ -217,6 +230,9 @@ export class StackProvider implements vscode.TreeDataProvider<StackTreeItem>, vs
 
   private triggerEnrichment(): void {
     this.cancelEnrichment()
+    if (!this.analysisEngine.isTokenEstimationEnabled) {
+      return
+    }
     this.enrichmentCTS = new vscode.CancellationTokenSource()
 
     void this.analysisEngine.enrichActiveTrack(this.enrichmentCTS.token)
@@ -329,11 +345,17 @@ export class StackProvider implements vscode.TreeDataProvider<StackTreeItem>, vs
 
     this.tokenAggregator.onDidChange(() => {
       this.treeBuilder.recalculateAllStats()
+      if (this.treeBuilder.sortOrder === 'tokensDesc') {
+        this.treeBuilder.resort()
+      }
       this._onDidChangeTreeData.fire()
     })
 
     this.analysisEngine.onDidUpdateStats(() => {
       this.treeBuilder.recalculateAllStats()
+      if (this.treeBuilder.sortOrder === 'tokensDesc') {
+        this.treeBuilder.resort()
+      }
       this._onDidChangeTreeData.fire()
     })
 
@@ -345,15 +367,26 @@ export class StackProvider implements vscode.TreeDataProvider<StackTreeItem>, vs
   private handleConfigChange(e: vscode.ConfigurationChangeEvent): void {
     if (e.affectsConfiguration('aiContextStacker')) {
       this.refreshConfigCache()
+      if (e.affectsConfiguration('aiContextStacker.enableTokenEstimation')) {
+        if (!this.analysisEngine.isTokenEstimationEnabled) {
+          this.cancelEnrichment()
+        }
+      }
+      if (e.affectsConfiguration('aiContextStacker.storageMode')) {
+        void this.trackManager.flushSaveNow()
+      }
       this._treeDirty = true
       this.triggerRefresh()
     }
   }
 
   private refreshConfigCache(): void {
-    this._largeFileThreshold = vscode.workspace
-      .getConfiguration('aiContextStacker')
-      .get<number>('largeFileThreshold', 5000)
+    const cfg = vscode.workspace.getConfiguration('aiContextStacker')
+    this._largeFileThreshold = cfg.get<number>('largeFileThreshold', 5000)
+
+    const sortOrder = cfg.get<string>('sortOrder', 'name') === 'tokensDesc' ? 'tokensDesc' : 'name'
+    this.treeBuilder.setSortOrder(sortOrder)
+    this.contextKeyService.updateSortByTokens(sortOrder === 'tokensDesc')
   }
 
   private findRecursive(nodes: StackTreeItem[], targetKey: string): StackTreeItem | undefined {

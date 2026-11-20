@@ -2,6 +2,8 @@ import * as vscode from 'vscode'
 
 import { ContentStats, getSortWeight, isStagedFolder, StackTreeItem, StagedFile, StagedFolder } from '../models'
 
+export type StackSortOrder = 'name' | 'tokensDesc'
+
 export function getDescendantFiles(item: StackTreeItem): StagedFile[] {
   if (isStagedFolder(item)) {
     return item.children.flatMap((child) => getDescendantFiles(child))
@@ -11,15 +13,30 @@ export function getDescendantFiles(item: StackTreeItem): StagedFile[] {
 
 export class TreeBuilder {
   private folderMap = new Map<string, StagedFolder>()
+  private parentMap = new Map<StackTreeItem, StagedFolder>()
   private rootItems: StackTreeItem[] = []
   private workspaceRoots: vscode.WorkspaceFolder[] = []
+  private _sortOrder: StackSortOrder = 'name'
   private readonly collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
   private readonly CHUNK_SIZE = 500
 
+  public get sortOrder(): StackSortOrder {
+    return this._sortOrder
+  }
+
+  public setSortOrder(order: StackSortOrder): void {
+    this._sortOrder = order
+  }
+
   public reset(): void {
     this.folderMap.clear()
+    this.parentMap.clear()
     this.rootItems = []
     this.refreshWorkspaceRoots()
+  }
+
+  public getParent(element: StackTreeItem): StagedFolder | undefined {
+    return this.parentMap.get(element)
   }
 
   public invalidateFolder(folderPath: string): void {
@@ -127,6 +144,7 @@ export class TreeBuilder {
     const segments = this.getOptimizedSegments(file)
     if (segments.length === 1) {
       this.rootItems.push(file)
+      this.parentMap.delete(file)
       this.applyInitialStats(file)
       return
     }
@@ -136,18 +154,23 @@ export class TreeBuilder {
   private insertNestedFile(file: StagedFile, segments: string[]): void {
     let currentPath = ''
     let parentChildren = this.rootItems
+    let parentFolder: StagedFolder | undefined
 
     for (let i = 0; i < segments.length - 1; i++) {
       const segment = segments[i]
       currentPath = currentPath ? `${currentPath}/${segment}` : segment
 
-      const folder = this.resolveOrCreateFolder(segment, currentPath, file.uri, parentChildren)
+      const folder = this.resolveOrCreateFolder(segment, currentPath, file.uri, parentChildren, parentFolder)
+      parentFolder = folder
       parentChildren = folder.children
 
       this.trackContainedFile(folder, file, i, segments.length)
     }
 
     parentChildren.push(file)
+    if (parentFolder) {
+      this.parentMap.set(file, parentFolder)
+    }
     this.applyInitialStats(file)
   }
 
@@ -156,6 +179,7 @@ export class TreeBuilder {
     currentPath: string,
     refUri: vscode.Uri,
     parentList: StackTreeItem[],
+    parentFolder: StagedFolder | undefined,
   ): StagedFolder {
     const folderId = `folder:${currentPath}`
     let folder = this.folderMap.get(folderId)
@@ -164,6 +188,9 @@ export class TreeBuilder {
       folder = this.createFolderNode(segment, currentPath, refUri)
       this.folderMap.set(folderId, folder)
       parentList.push(folder)
+      if (parentFolder) {
+        this.parentMap.set(folder, parentFolder)
+      }
     }
     return folder
   }
@@ -186,6 +213,8 @@ export class TreeBuilder {
     if (file.stats?.tokenCount) {
       this.updateFileStats(file, file.stats, undefined)
     }
+
+    this.parentMap.delete(file)
 
     const segments = this.getOptimizedSegments(file)
     if (segments.length === 1) {
@@ -230,6 +259,7 @@ export class TreeBuilder {
       if (folder.children.length > 0) break
 
       this.folderMap.delete(folder.id)
+      this.parentMap.delete(folder)
       this.detachFolder(folder, i, parents)
     }
   }
@@ -283,6 +313,20 @@ export class TreeBuilder {
   }
 
   private compareNodes(a: StackTreeItem, b: StackTreeItem): number {
+    if (this._sortOrder === 'tokensDesc') {
+      const aPinned = a.isPinned ? 1 : 0
+      const bPinned = b.isPinned ? 1 : 0
+      if (aPinned !== bPinned) {
+        return bPinned - aPinned
+      }
+
+      const tokensA = this.getNodeTokenCount(a)
+      const tokensB = this.getNodeTokenCount(b)
+      if (tokensA !== tokensB) {
+        return tokensB - tokensA
+      }
+    }
+
     const weightA = getSortWeight(a)
     const weightB = getSortWeight(b)
 
@@ -290,6 +334,13 @@ export class TreeBuilder {
       return weightB - weightA
     }
     return this.collator.compare(a.label, b.label)
+  }
+
+  private getNodeTokenCount(item: StackTreeItem): number {
+    if (isStagedFolder(item)) {
+      return item.tokenCount ?? 0
+    }
+    return item.stats?.tokenCount ?? 0
   }
 
   private propagatePinState(nodes: StackTreeItem[]): boolean {

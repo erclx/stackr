@@ -1,13 +1,18 @@
+import { TextDecoder, TextEncoder } from 'util'
 import * as vscode from 'vscode'
 
 import { ContextTrack, SerializedState } from '../models'
 import { Logger } from '../utils'
 import { StateMapper } from './state-mapper'
 
+export type StorageMode = 'workspaceState' | 'workspaceFile'
+
 export class PersistenceService implements vscode.Disposable {
   private static readonly STORAGE_KEY = 'aiContextStacker.tracks.v1'
   private static readonly STORAGE_LIMIT_BYTES = 100_000
   private static readonly DEBOUNCE_MS = 500
+  private static readonly WORKSPACE_FILE_DIR = '.vscode'
+  private static readonly WORKSPACE_FILE_NAME = 'stackr.json'
 
   private _saveTimer: NodeJS.Timeout | undefined
   private _pendingSave: (() => Promise<void>) | undefined
@@ -15,8 +20,24 @@ export class PersistenceService implements vscode.Disposable {
 
   constructor(private context: vscode.ExtensionContext) {}
 
+  public getStorageMode(): StorageMode {
+    const mode = vscode.workspace.getConfiguration('aiContextStacker').get<string>('storageMode', 'workspaceState')
+    return mode === 'workspaceFile' ? 'workspaceFile' : 'workspaceState'
+  }
+
   public async load(): Promise<SerializedState | undefined> {
     const start = Date.now()
+    const mode = this.getStorageMode()
+
+    if (mode === 'workspaceFile') {
+      const fromFile = await this.loadFromWorkspaceFile()
+      if (fromFile) {
+        Logger.debug(`Workspace file storage read in ${Date.now() - start}ms`)
+        this._lastFingerprint = this.generateFingerprintRaw(fromFile)
+        return fromFile
+      }
+    }
+
     const raw = this.context.workspaceState.get<SerializedState>(PersistenceService.STORAGE_KEY)
     if (raw) {
       Logger.debug(`Storage read in ${Date.now() - start}ms`)
@@ -43,12 +64,17 @@ export class PersistenceService implements vscode.Disposable {
     }, PersistenceService.DEBOUNCE_MS)
   }
 
-  public async saveImmediate(tracks: Map<string, ContextTrack>, activeId: string, order: string[]): Promise<void> {
+  public async saveImmediate(
+    tracks: Map<string, ContextTrack>,
+    activeId: string,
+    order: string[],
+    force: boolean = false,
+  ): Promise<void> {
     if (this._saveTimer) {
       clearTimeout(this._saveTimer)
       this._saveTimer = undefined
     }
-    await this.performSave(tracks, activeId, order)
+    await this.performSave(tracks, activeId, order, force)
     this._pendingSave = undefined
   }
 
@@ -59,6 +85,15 @@ export class PersistenceService implements vscode.Disposable {
     }
     this._lastFingerprint = 0
     await this.context.workspaceState.update(PersistenceService.STORAGE_KEY, undefined)
+
+    const fileUri = this.getWorkspaceFileUri()
+    if (fileUri && this.getStorageMode() === 'workspaceFile') {
+      try {
+        await vscode.workspace.fs.delete(fileUri, { useTrash: false })
+      } catch {
+        // File may not exist yet
+      }
+    }
   }
 
   public dispose(): void {
@@ -69,14 +104,28 @@ export class PersistenceService implements vscode.Disposable {
     }
   }
 
-  private async performSave(tracks: Map<string, ContextTrack>, activeId: string, order: string[]): Promise<void> {
+  private async performSave(
+    tracks: Map<string, ContextTrack>,
+    activeId: string,
+    order: string[],
+    force: boolean = false,
+  ): Promise<void> {
     try {
       const newFingerprint = this.generateFingerprint(tracks, activeId, order)
-      if (newFingerprint === this._lastFingerprint) {
+      if (!force && newFingerprint === this._lastFingerprint) {
         return
       }
 
       const state = StateMapper.toSerialized(tracks, activeId, order)
+
+      if (this.getStorageMode() === 'workspaceFile') {
+        const savedToFile = await this.saveToWorkspaceFile(state)
+        if (savedToFile) {
+          this._lastFingerprint = newFingerprint
+          return
+        }
+      }
+
       const json = JSON.stringify(state)
       const size = json.length
 
@@ -84,7 +133,9 @@ export class PersistenceService implements vscode.Disposable {
         Logger.warn(
           `State size ${size} bytes exceeds limit of ${PersistenceService.STORAGE_LIMIT_BYTES}. Aborting save.`,
         )
-        vscode.window.showWarningMessage('Stackr: State is too large to save. Please remove some files.')
+        vscode.window.showWarningMessage(
+          'Stackr: State is too large for workspaceState (>100KB). Switch "aiContextStacker.storageMode" to "workspaceFile" in Settings to remove this limit.',
+        )
         return
       }
 
@@ -97,6 +148,53 @@ export class PersistenceService implements vscode.Disposable {
     }
   }
 
+  private getWorkspaceFileUri(): vscode.Uri | undefined {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri
+    if (!root) {
+      return undefined
+    }
+    return vscode.Uri.joinPath(root, PersistenceService.WORKSPACE_FILE_DIR, PersistenceService.WORKSPACE_FILE_NAME)
+  }
+
+  private async loadFromWorkspaceFile(): Promise<SerializedState | undefined> {
+    const fileUri = this.getWorkspaceFileUri()
+    if (!fileUri) {
+      return undefined
+    }
+
+    try {
+      const bytes = await vscode.workspace.fs.readFile(fileUri)
+      const text = new TextDecoder('utf-8').decode(bytes)
+      const parsed = JSON.parse(text) as SerializedState
+      if (parsed && typeof parsed === 'object' && parsed.tracks) {
+        return parsed
+      }
+      return undefined
+    } catch {
+      return undefined
+    }
+  }
+
+  private async saveToWorkspaceFile(state: SerializedState): Promise<boolean> {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri
+    const fileUri = this.getWorkspaceFileUri()
+    if (!root || !fileUri) {
+      return false
+    }
+
+    try {
+      const dirUri = vscode.Uri.joinPath(root, PersistenceService.WORKSPACE_FILE_DIR)
+      await vscode.workspace.fs.createDirectory(dirUri)
+      const json = JSON.stringify(state, null, 2) + '\n'
+      const bytes = new TextEncoder().encode(json)
+      await vscode.workspace.fs.writeFile(fileUri, bytes)
+      return true
+    } catch (error) {
+      Logger.error('Failed to write .vscode/stackr.json', error as Error)
+      return false
+    }
+  }
+
   private generateFingerprint(tracks: Map<string, ContextTrack>, activeId: string, order: string[]): number {
     let hash = 5381
 
@@ -105,10 +203,18 @@ export class PersistenceService implements vscode.Disposable {
       hash = this.updateHash(hash, id)
     }
 
-    for (const track of tracks.values()) {
+    const trackKeys = Array.from(tracks.keys()).sort()
+    for (const key of trackKeys) {
+      const track = tracks.get(key)
+      if (!track) {
+        continue
+      }
       hash = this.updateHash(hash, track.id)
+      hash = this.updateHash(hash, track.name)
       for (const file of track.files) {
         hash = this.updateHash(hash, file.uri.toString())
+        hash = this.updateHash(hash, file.isPinned ? '1' : '0')
+        hash = this.updateHash(hash, file.isFromFolderAddition ? '1' : '0')
       }
     }
 
@@ -130,9 +236,12 @@ export class PersistenceService implements vscode.Disposable {
     for (const key of trackKeys) {
       const t = tracks[key]
       hash = this.updateHash(hash, t.id)
+      hash = this.updateHash(hash, t.name || '')
       if (t.items && Array.isArray(t.items)) {
         for (const item of t.items) {
           hash = this.updateHash(hash, item.uri)
+          hash = this.updateHash(hash, item.isPinned ? '1' : '0')
+          hash = this.updateHash(hash, item.isFromFolderAddition ? '1' : '0')
         }
       }
     }

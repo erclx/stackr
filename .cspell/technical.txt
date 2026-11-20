@@ -1,3 +1,4 @@
+ACMR
 APOS
 backticked
 canon
@@ -9,6 +10,7 @@ commitlint
 descr
 disposables
 elif
+EOCD
 esac
 esbenp
 esbuild

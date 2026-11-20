@@ -74,25 +74,40 @@ export class StackerStatusBar implements vscode.Disposable {
       return
     }
 
-    const totalTokens = this.provider.getTotalTokens()
-    const formattedTokens = this.provider.formatTokenCount(totalTokens)
     const trackName = this.provider.getActiveTrackName()
+    const estimationEnabled = this.provider.analysisEngine.isTokenEstimationEnabled
     const isAnalyzing = this.provider.analysisEngine.isAnalyzing
 
-    if (isAnalyzing) {
-      this.item.text = `$(sync~spin) Analyzing... ${trackName} (${formattedTokens})`
+    if (!estimationEnabled) {
+      this.item.text = `$(layers) ${trackName} (${files.length} ${files.length === 1 ? 'file' : 'files'})`
+      this.item.tooltip = new vscode.MarkdownString(
+        `**Active Track:** ${trackName}\n\n` +
+          `**Status:** Ready\n` +
+          `**Files:** ${files.length} staged\n` +
+          `**Tokens:** Disabled\n\n` +
+          `$(copy) Click to Copy All\n` +
+          `$(layers) Use View Title icons to Switch Track`,
+      )
     } else {
-      this.item.text = `$(layers) ${trackName} (${formattedTokens})`
+      const totalTokens = this.provider.getTotalTokens()
+      const formattedTokens = this.provider.formatTokenCount(totalTokens)
+
+      if (isAnalyzing) {
+        this.item.text = `$(sync~spin) Analyzing... ${trackName} (${formattedTokens})`
+      } else {
+        this.item.text = `$(layers) ${trackName} (${formattedTokens})`
+      }
+
+      this.item.tooltip = new vscode.MarkdownString(
+        `**Active Track:** ${trackName}\n\n` +
+          `**Status:** ${isAnalyzing ? 'Analyzing...' : 'Ready'}\n` +
+          `**Files:** ${files.length} staged\n` +
+          `**Tokens:** ${formattedTokens}\n\n` +
+          `$(copy) Click to Copy All\n` +
+          `$(layers) Use View Title icons to Switch Track`,
+      )
     }
 
-    this.item.tooltip = new vscode.MarkdownString(
-      `**Active Track:** ${trackName}\n\n` +
-        `**Status:** ${isAnalyzing ? 'Analyzing...' : 'Ready'}\n` +
-        `**Files:** ${files.length} staged\n` +
-        `**Tokens:** ${formattedTokens}\n\n` +
-        `$(copy) Click to Copy All\n` +
-        `$(layers) Use View Title icons to Switch Track`,
-    )
     this.item.tooltip.supportThemeIcons = true
     this.item.tooltip.isTrusted = true
 
